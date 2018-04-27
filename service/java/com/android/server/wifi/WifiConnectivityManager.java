@@ -85,7 +85,7 @@ public class WifiConnectivityManager {
     public static final int MAX_PERIODIC_SCAN_INTERVAL_MS = 160 * 1000; // 160 seconds
     // PNO scan interval in milli-seconds. This is the scan
     // performed when screen is off and disconnected.
-    private static final int DISCONNECTED_PNO_SCAN_INTERVAL_MS = 20 * 1000; // 20 seconds
+    private static final int DISCONNECTED_PNO_SCAN_INTERVAL_MS = 30 * 1000; // 30 seconds
     // PNO scan interval in milli-seconds. This is the scan
     // performed when screen is off and connected.
     private static final int CONNECTED_PNO_SCAN_INTERVAL_MS = 160 * 1000; // 160 seconds
@@ -481,17 +481,12 @@ public class WifiConnectivityManager {
             clearScanDetails();
             mScanRestartCount = 0;
 
-            if (!wasConnectAttempted) {
-                // The scan results were rejected by WifiNetworkSelector due to low RSSI values
-                if (mLowRssiNetworkRetryDelay > LOW_RSSI_NETWORK_RETRY_MAX_DELAY_MS) {
-                    mLowRssiNetworkRetryDelay = LOW_RSSI_NETWORK_RETRY_MAX_DELAY_MS;
-                }
+            if (wasConnectAttempted) {
+                // connection candidate found => re-schedule connectivity scan
+                //   use delayed schedule
+                //      - connectivity scan will be aborted if connection attempt is successful
+                //      - connectivity scan will be restarted if connection attempt is NOT successful (e.g. due to low RSSI)
                 scheduleDelayedConnectivityScan(mLowRssiNetworkRetryDelay);
-
-                // Set up the delay value for next retry.
-                mLowRssiNetworkRetryDelay *= 2;
-            } else {
-                resetLowRssiNetworkRetryDelay();
             }
         }
     }
@@ -929,6 +924,9 @@ public class WifiConnectivityManager {
         scanSettings.reportEvents = WifiScanner.REPORT_EVENT_NO_BATCH;
         scanSettings.numBssidsPerScan = 0;
         scanSettings.periodInMs = DISCONNECTED_PNO_SCAN_INTERVAL_MS;
+        // setup exponential backoff scan
+        scanSettings.maxPeriodInMs = 480000;
+        scanSettings.stepCount = 2;
 
         mPnoScanListener.clearScanDetails();
 

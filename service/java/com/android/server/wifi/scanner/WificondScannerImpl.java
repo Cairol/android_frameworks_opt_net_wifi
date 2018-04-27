@@ -77,7 +77,7 @@ public class WificondScannerImpl extends WifiScannerImpl implements Handler.Call
     // Active background scan settings/state
     private WifiNative.ScanSettings mBackgroundScanSettings = null;
     private WifiNative.ScanEventHandler mBackgroundScanEventHandler = null;
-    private int mNextBackgroundScanPeriod = 0;
+    private int mBackgroundScanPeriodCounter = 0;
     private int mNextBackgroundScanId = 0;
     private boolean mBackgroundScanPeriodPending = false;
     private boolean mBackgroundScanPaused = false;
@@ -347,7 +347,7 @@ public class WificondScannerImpl extends WifiScannerImpl implements Handler.Call
                 if (mPendingBackgroundScanSettings != null) {
                     mBackgroundScanSettings = mPendingBackgroundScanSettings;
                     mBackgroundScanEventHandler = mPendingBackgroundScanEventHandler;
-                    mNextBackgroundScanPeriod = 0;
+                    mBackgroundScanPeriodCounter = 0;
                     mPendingBackgroundScanSettings = null;
                     mPendingBackgroundScanEventHandler = null;
                     mBackgroundScanPeriodPending = true;
@@ -358,7 +358,7 @@ public class WificondScannerImpl extends WifiScannerImpl implements Handler.Call
                             ++bucket_id) {
                         WifiNative.BucketSettings bucket =
                                 mBackgroundScanSettings.buckets[bucket_id];
-                        if (mNextBackgroundScanPeriod % (bucket.period_ms
+                        if (mBackgroundScanPeriodCounter % (bucket.period_ms
                                         / mBackgroundScanSettings.base_period_ms) == 0) {
                             if ((bucket.report_events
                                             & WifiScanner.REPORT_EVENT_AFTER_EACH_SCAN) != 0) {
@@ -383,12 +383,31 @@ public class WificondScannerImpl extends WifiScannerImpl implements Handler.Call
                                 mBackgroundScanSettings.report_threshold_num_scans,
                                 mBackgroundScanSettings.report_threshold_percent);
                     }
-                    mNextBackgroundScanPeriod++;
-                    mBackgroundScanPeriodPending = false;
+
+                    // set wake up period for next scan (use periodic scan as default)
+                    long period = mBackgroundScanSettings.base_period_ms;
+                    // check for binary exponential backoff scan
+                    //    is always the first bucket ( see class Bucket::createBucketSettings(...) )
+                    if (mBackgroundScanSettings.buckets[0].max_period_ms != 0
+                        && mBackgroundScanSettings.buckets[0].max_period_ms != mBackgroundScanSettings.buckets[0].period_ms
+                        && mBackgroundScanSettings.buckets[0].step_count != 0) {
+                        // first bucket is a binary exponential backoff scan => set period
+                        period = mBackgroundScanSettings.buckets[0].period_ms
+                            << (mBackgroundScanPeriodCounter / mBackgroundScanSettings.buckets[0].step_count);
+                        if (period > mBackgroundScanSettings.buckets[0].max_period_ms) {
+                            period = mBackgroundScanSettings.buckets[0].max_period_ms;
+                            }
+                    }
+
+                    // schedule alarm for next scan
+                    Log.i(TAG, "Scheduling alarm for next background scan in " + period + " ms");
                     mAlarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                            mClock.getElapsedSinceBootMillis()
-                                    + mBackgroundScanSettings.base_period_ms,
+                            mClock.getElapsedSinceBootMillis() + period,
                             BACKGROUND_PERIOD_ALARM_TAG, mScanPeriodListener, mEventHandler);
+                    // prepare next scan
+                    mBackgroundScanPeriodCounter++;
+                    mBackgroundScanPeriodPending = false;
+
                 }
             }
 
