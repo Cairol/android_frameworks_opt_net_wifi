@@ -418,6 +418,7 @@ public class WifiConnectivityManager {
 
         @Override
         public void onSuccess() {
+            mSingleScanRestartCount = 0;
         }
 
         @Override
@@ -475,6 +476,7 @@ public class WifiConnectivityManager {
 
         @Override
         public void onSuccess() {
+            mScanRestartCount = 0;
         }
 
         @Override
@@ -1147,7 +1149,6 @@ public class WifiConnectivityManager {
         // to provide periodic scan in an exponential backoff fashion.
         cancelPeriodicScanTimer();
         stopPnoScan();
-        mScanRestartCount = 0;
     }
 
     /**
@@ -1504,6 +1505,8 @@ public class WifiConnectivityManager {
         if (!mRunning) return;
         mRunning = false;
         stopConnectivityScan();
+        mScanRestartCount = 0;
+        mSingleScanRestartCount = 0;
         clearBssidBlacklist();
         resetLastPeriodicSingleScanTimeStamp();
         mOpenNetworkNotifier.clearPendingNotification(true /* resetRepeatDelay */);
