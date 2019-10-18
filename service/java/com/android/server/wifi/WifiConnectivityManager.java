@@ -112,10 +112,14 @@ public class WifiConnectivityManager {
     // Number of milli-seconds to delay before retry starting
     // a previously failed scan
     private static final int RESTART_SCAN_DELAY_MS = 2 * 1000; // 2 seconds
-    // When in disconnected mode, a watchdog timer will be fired
-    // every WATCHDOG_INTERVAL_MS to start a single scan. This is
+    // When in disconnected mode, a watchdog timer will be fired in an
+    // exponentially increasing interval to start a single scan. This is
     // to prevent caveat from things like PNO scan.
-    private static final int WATCHDOG_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
+    private static final int WATCHDOG_INTERVAL_MAX_MS = 20 * 60 * 1000; // max interval is 20 minutes
+    private static final int WATCHDOG_INTERVAL_START_MS = 20 * 1000; // start interval is 20 seconds
+    private static final int WATCHDOG_INTERVAL_LOOPS = 2; // each interval is active for 2 watchdogs
+    private static final boolean WATCHDOG_INTERVAL_SEQUENCE_START = true;
+    private static final boolean WATCHDOG_INTERVAL_SEQUENCE_CONTINUE = false;
     // Restricted channel list age out value.
     private static final int CHANNEL_LIST_AGE_MS = 60 * 60 * 1000; // 1 hour
     // This is the time interval for the connection attempt rate calculation. Connection attempt
@@ -173,6 +177,7 @@ public class WifiConnectivityManager {
     private long mLastPeriodicSingleScanTimeStamp = RESET_TIME_STAMP;
     private boolean mPnoScanStarted = false;
     private boolean mPeriodicScanTimerSet = false;
+    private int mWatchdogIntervalCount = 0;
     // Device configs
     private boolean mEnableAutoJoinWhenAssociated;
     private boolean mWaitForFullBandScanResults = false;
@@ -237,7 +242,7 @@ public class WifiConnectivityManager {
         }
     }
 
-    // As a watchdog mechanism, a single scan will be scheduled every WATCHDOG_INTERVAL_MS
+    // As a watchdog mechanism, a single scan will be scheduled
     // if it is in the WIFI_STATE_DISCONNECTED state.
     private final AlarmManager.OnAlarmListener mWatchdogListener =
             new AlarmManager.OnAlarmListener() {
@@ -831,7 +836,7 @@ public class WifiConnectivityManager {
         if (mWifiState == WIFI_STATE_DISCONNECTED) {
             localLog("start a single scan from watchdogHandler");
 
-            scheduleWatchdogTimer();
+            scheduleWatchdogTimer(WATCHDOG_INTERVAL_SEQUENCE_CONTINUE);
             startSingleScan(true, WIFI_WORK_SOURCE);
         }
     }
@@ -1061,11 +1066,23 @@ public class WifiConnectivityManager {
     }
 
     // Set up watchdog timer
-    private void scheduleWatchdogTimer() {
-        localLog("scheduleWatchdogTimer");
+    private void scheduleWatchdogTimer(boolean firstWatchdog) {
+
+        // restart watchdog interval sequence?
+        if (firstWatchdog)
+            mWatchdogIntervalCount = 0;
+        // calculate next watchdog interval
+        int nextWatchdogInterval = WATCHDOG_INTERVAL_START_MS
+            << (mWatchdogIntervalCount++ / WATCHDOG_INTERVAL_LOOPS);
+        // interval limiter
+        if (nextWatchdogInterval > WATCHDOG_INTERVAL_MAX_MS)
+            nextWatchdogInterval = WATCHDOG_INTERVAL_MAX_MS;
+
+        localLog("scheduleWatchdogTimer: interval number " + mWatchdogIntervalCount
+                + ", interval = " + nextWatchdogInterval + " ms");
 
         mAlarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                            mClock.getElapsedSinceBootMillis() + WATCHDOG_INTERVAL_MS,
+                            mClock.getElapsedSinceBootMillis() + nextWatchdogInterval,
                             WATCHDOG_TIMER_TAG,
                             mWatchdogListener, mEventHandler);
     }
@@ -1202,7 +1219,7 @@ public class WifiConnectivityManager {
         // the watchdog timer if entering disconnected state.
         if (mWifiState == WIFI_STATE_DISCONNECTED) {
             mLastConnectionAttemptBssid = null;
-            scheduleWatchdogTimer();
+            scheduleWatchdogTimer(WATCHDOG_INTERVAL_SEQUENCE_START);
             startConnectivityScan(SCAN_IMMEDIATELY);
         } else {
             startConnectivityScan(SCAN_ON_SCHEDULE);
